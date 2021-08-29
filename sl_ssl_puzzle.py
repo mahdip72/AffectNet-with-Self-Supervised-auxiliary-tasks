@@ -244,7 +244,7 @@ def main(augment_level):
     # augment_level = 'weak'
     # augment_level = 'strong'
 
-    model_name = f'sl-ssl_puzzling_rotation_{int(np.sqrt(number_of_tiles))}×{int(np.sqrt(number_of_tiles))}-{augment_level}_augment'
+    model_name = f'sl-ssl_puzzling_{int(np.sqrt(number_of_tiles))}×{int(np.sqrt(number_of_tiles))}-{augment_level}_augment'
     # model_name = 'test'
 
     if not os.path.exists(f"./results/{model_name}"):
