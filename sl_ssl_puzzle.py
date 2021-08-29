@@ -8,10 +8,11 @@ import cv2
 import tensorflow_addons as tfa
 from collections import Counter
 from tensorflow.keras.applications.resnet50 import ResNet50
+# from tensorflow.keras.applications.efficientnet import EfficientNetB0
 from tensorflow.keras import mixed_precision
 from tensorflow.keras.callbacks import ModelCheckpoint, CSVLogger
 
-number_of_tiles = 4
+number_of_tiles = 9
 
 
 def get_class_weights(y, inverse=False):
@@ -117,57 +118,94 @@ def assigning_weight(label):
     return label_weights[label.numpy()]
 
 
-def train_preprocessing(image_path, label):
-    img = tf.io.read_file(image_path)
-    img = tf.io.decode_image(img, channels=3, dtype=tf.dtypes.float32, expand_animations=False)
-    img = tf.image.resize(img, [350, 350])
-
-    # img = tf.image.random_hue(img, 0.2)
-    # img = tf.image.random_contrast(img, lower=0.6, upper=1.4)
-    # img = tf.image.random_brightness(img, max_delta=0.05)
-    # img = tf.clip_by_value(img, 0.0, 1.0)
-
-    # var = tf.random.uniform(shape=[], minval=0, maxval=0.05, dtype=tf.float16)
-    # noise = tf.random.normal(shape=[224, 224, 3], mean=0.0,
-    #                          stddev=tf.random.uniform(shape=[], minval=0, maxval=var, dtype=tf.float16),
-    #                          dtype=tf.float16)
-    # img = tf.add(img, noise)
-    # img = tf.clip_by_value(img, 0.0, 1.0)
-
-    # kernel_size = tf.random.uniform(shape=[], minval=0, maxval=2, dtype=tf.int32)
-    # img = tfa.image.gaussian_filter2d(img, filter_shape=[kernel_size * 2 + 1, kernel_size * 2 + 1],
-    #                                   sigma=[1.5, 1.5])
-
-    # with tf.device("/gpu:0"):
-    # size = tf.random.uniform(shape=[], minval=180, maxval=224, dtype=tf.int32)
-    # img = tf.image.random_crop(img, (size, size, 3))
-    img = rand_crop(img, fmin=0.8, fmax=1.0)
-    # img = tf.image.central_crop(img, 0.69)
-
+def no_augment(img):
+    img = tf.image.random_flip_left_right(img)
+    img = tf.image.central_crop(img, 0.69)
     img = tf.image.resize(img, [224, 224])
+    return img
 
-    img, shuffle_label = jigsaw_puzzle(img, number_of_tiles)
 
-    # img = tfa.image.random_cutout(tf.expand_dims(img, 0), mask_size=(70, 70),
-    #                               constant_values=0)
-    # img = tf.squeeze(img)
+def weak_augment(img):
+    img = tf.image.random_contrast(img, lower=0.6, upper=1.4)
+    img = tf.clip_by_value(img, 0.0, 1.0)
 
-    all_labels = {
-        'emotion': tf.one_hot(label, depth=8),
-    }
+    rot = tf.random.uniform(shape=[1], minval=-15, maxval=15, dtype=tf.float32)
+    rad = tf.divide((tf.cast(rot, tf.float32)) * np.pi, 180)
+    img = tfa.image.rotate(img, rad)
+    img = tf.squeeze(img)
 
-    shuffle_label = tf.one_hot(shuffle_label, depth=number_of_tiles)
-    for i in range(number_of_tiles):
-        all_labels[f'part_{i + 1}'] = shuffle_label[i]
+    img = rand_crop(img, fmin=0.69, fmax=0.99)
+    img = tf.image.resize(img, [224, 224])
+    return img
 
-    all_sample_weights = {
-        'emotion': tf.py_function(func=assigning_weight, inp=[label], Tout=[tf.float32]),
-    }
 
-    for i in range(number_of_tiles):
-        all_sample_weights[f'part_{i + 1}'] = 1
+def strong_augment(img):
+    # img = tf.image.random_hue(img, 0.2)
+    img = tf.image.random_contrast(img, lower=0.6, upper=1.4)
+    img = tf.image.random_brightness(img, max_delta=0.05)
+    img = tf.clip_by_value(img, 0.0, 1.0)
 
-    return img, all_labels, all_sample_weights
+    var = tf.random.uniform(shape=[], minval=0, maxval=0.05, dtype=tf.float32)
+    noise = tf.random.normal(shape=[350, 350, 3], mean=0.0,
+                             stddev=tf.random.uniform(shape=[], minval=0, maxval=var, dtype=tf.float32),
+                             dtype=tf.float32)
+    img = tf.add(img, noise)
+    img = tf.clip_by_value(img, 0.0, 1.0)
+
+    kernel_size = tf.random.uniform(shape=[], minval=0, maxval=2, dtype=tf.int32)
+    img = tfa.image.gaussian_filter2d(img, filter_shape=[kernel_size * 2 + 1, kernel_size * 2 + 1],
+                                      sigma=[1.5, 1.5])
+
+    rot = tf.random.uniform(shape=[1], minval=-20, maxval=20, dtype=tf.float32)
+    rad = tf.divide((tf.cast(rot, tf.float32)) * np.pi, 180)
+    img = tfa.image.rotate(img, rad)
+    img = tf.squeeze(img)
+
+    img = rand_crop(img, fmin=0.69, fmax=0.99)
+    img = tf.image.resize(img, [224, 224])
+    return img
+
+
+def train_preprocessing(augment_level='no'):
+    def compute(image_path, label):
+        img = tf.io.read_file(image_path)
+        img = tf.io.decode_image(img, channels=3, dtype=tf.dtypes.float32, expand_animations=False)
+        img = tf.image.resize(img, [350, 350])
+
+        if augment_level == 'no':
+            img = no_augment(img)
+        elif augment_level == 'weak':
+            img = weak_augment(img)
+        elif augment_level == 'strong':
+            img = strong_augment(img)
+
+        img = tf.image.resize(img, [224, 224])
+
+        img, shuffle_label = jigsaw_puzzle(img, number_of_tiles)
+
+        if augment_level == 'strong':
+            img = tfa.image.random_cutout(tf.expand_dims(img, 0), mask_size=(60, 60),
+                                          constant_values=0)
+            img = tf.squeeze(img)
+
+        all_labels = {
+            'emotion': tf.one_hot(label, depth=8),
+        }
+
+        shuffle_label = tf.one_hot(shuffle_label, depth=number_of_tiles)
+        for i in range(number_of_tiles):
+            all_labels[f'part_{i + 1}'] = shuffle_label[i]
+
+        all_sample_weights = {
+            'emotion': tf.py_function(func=assigning_weight, inp=[label], Tout=[tf.float32]),
+        }
+
+        for i in range(number_of_tiles):
+            all_sample_weights[f'part_{i + 1}'] = 1
+
+        return img, all_labels, all_sample_weights
+
+    return compute
 
 
 def valid_preprocessing(image_path, label):
@@ -193,18 +231,20 @@ def valid_preprocessing(image_path, label):
     return img, all_labels
 
 
-def main():
+def main(augment_level):
     autotune = tf.data.experimental.AUTOTUNE
     tf.keras.backend.clear_session()
     mixed_precision.set_global_policy('mixed_float16')
-    np.random.seed(12)
+    # np.random.seed(12)
 
     # dataset dir includes label and Manually_Annotated_Images folders
     dataset_dir = os.path.abspath("S:/Datasets/FER/AffectNet")
 
-    model_name = 'sl-ssl_puzzling-no_augment'
-    # model_name = 'sl-ssl_puzzling-weak_augment'
-    # model_name = 'sl-ssl_puzzling-strong_augment'
+    # augment_level = 'no'
+    # augment_level = 'weak'
+    # augment_level = 'strong'
+
+    model_name = f'sl-ssl_puzzling_rotation_{int(np.sqrt(number_of_tiles))}×{int(np.sqrt(number_of_tiles))}-{augment_level}_augment'
     # model_name = 'test'
 
     if not os.path.exists(f"./results/{model_name}"):
@@ -226,12 +266,11 @@ def main():
                                                        'face_height', 'facial_landmarks', 'expression', 'valence',
                                                        'arousal'],
                                  low_memory=False)
-
     valid_csv_data = valid_csv_data[~valid_csv_data['subDirectory_filePath'].str.contains(".tif", case=False)]
+    valid_csv_data = valid_csv_data[valid_csv_data['expression'] <= 7]
     valid_csv_data['subDirectory_filePath'] = os.path.join(dataset_dir,
                                                            'Manually_Annotated_Images/Manually_Annotated_Images/') + \
                                               valid_csv_data['subDirectory_filePath'].astype(str)
-    valid_csv_data = valid_csv_data[valid_csv_data['expression'] <= 7]
 
     batch = 32
 
@@ -245,7 +284,8 @@ def main():
     # sample_weights = np.array([class_weights[i] for i in train_labels])
 
     train_ds = tf.data.Dataset.from_tensor_slices((np.array(input_data), np.array(train_labels)))
-    train_ds = train_ds.shuffle(int(len(train_csv_data))).map(train_preprocessing, num_parallel_calls=autotune)
+    train_ds = train_ds.shuffle(int(len(train_csv_data))).map(train_preprocessing(augment_level=augment_level),
+                                                              num_parallel_calls=autotune)
     train_ds = train_ds.batch(batch).prefetch(autotune)
 
     valid_labels = valid_csv_data.iloc[:, 6]
@@ -273,39 +313,21 @@ def main():
                         # weights='imagenet',
                         weights=None,
                         )
-    backbone.summary()
+
+    # backbone.summary()
     x = tf.keras.layers.GlobalAveragePooling2D()(backbone.output)
     emotion_dropout = tf.keras.layers.Dropout(0.3)(x)
 
     emotion = tf.keras.layers.Dense(8, activation='softmax', name='emotion', dtype=tf.float32)(emotion_dropout)
 
-    ssl_branch = tf.keras.layers.Conv2D(128, (1, 1),
-                                        activation='linear')(backbone.get_layer('conv4_block6_out').output)
-    ssl_branch = tf.keras.layers.BatchNormalization()(ssl_branch)
-    ssl_branch = tf.keras.layers.Activation('relu')(ssl_branch)
-
-    ssl_branch = tf.keras.layers.Conv2D(256, (3, 3), activation='linear')(ssl_branch)
-    ssl_branch = tf.keras.layers.BatchNormalization()(ssl_branch)
-    ssl_branch = tf.keras.layers.Activation('relu')(ssl_branch)
-
-    ssl_branch = tf.keras.layers.Conv2D(256, (3, 3), activation='linear')(ssl_branch)
-    ssl_branch = tf.keras.layers.BatchNormalization()(ssl_branch)
-    ssl_branch = tf.keras.layers.Activation('relu')(ssl_branch)
-
-    ssl_branch = tf.keras.layers.GlobalAveragePooling2D()(ssl_branch)
-    ssl_branch_dropout = tf.keras.layers.Dropout(0.2)(ssl_branch)
+    ssl_branch_dropout = tf.keras.layers.Dropout(0.2)(x)
 
     # self supervised heads
     for i in range(number_of_tiles):
-        # fully connected layer
-        globals()[f"x{i + 1}"] = tf.keras.layers.Dense(16,
-                                                       activation='relu')(ssl_branch_dropout)
-
-        # puzzle head
-        globals()[f"puzzle_head_{i + 1}"] = tf.keras.layers.Dense(number_of_tiles,
-                                                                  activation='softmax',
-                                                                  name=f'part_{i + 1}',
-                                                                  dtype='float32')(globals()[f"x{i + 1}"])
+        globals()[f"part_{i + 1}"] = tf.keras.layers.Dense(number_of_tiles,
+                                                           activation='softmax',
+                                                           name=f'part_{i + 1}',
+                                                           dtype='float32')(ssl_branch_dropout)
 
     # supervised head
     heads = [
@@ -313,7 +335,7 @@ def main():
     ]
 
     # self-supervised heads
-    heads += [globals()[f"puzzle_head_{i + 1}"] for i in range(number_of_tiles)]
+    heads += [globals()[f"part_{i + 1}"] for i in range(number_of_tiles)]
 
     model = tf.keras.Model(inputs=backbone.input,
                            outputs=heads
@@ -363,7 +385,7 @@ def main():
                              append=False)
 
     def lr_scheduler(epoch, lr):
-        if epoch == 20 or epoch == 40:
+        if epoch == 15 or epoch == 40:
             lr = lr / 10
             return lr
         else:
@@ -381,13 +403,14 @@ def main():
     ]
 
     model.fit(train_ds,
+              # steps_per_epoch=30,
               validation_data=valid_ds,
               callbacks=callbacks_list,
               verbose=2,
               epochs=80)
 
-    print('finish')
+    print(f'finish sl + ssl puzzling with {augment_level} augment')
 
 
 if __name__ == '__main__':
-    main()
+    main('no')
