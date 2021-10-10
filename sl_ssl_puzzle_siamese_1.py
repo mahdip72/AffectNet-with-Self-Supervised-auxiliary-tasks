@@ -9,12 +9,10 @@ from lr_scheduler import WarmUpCosine
 import tensorflow_addons as tfa
 from collections import Counter
 from tensorflow.keras.applications.resnet50 import ResNet50
-from tensorflow.keras.applications.mobilenet_v2 import MobileNetV2
 from tensorflow.keras import mixed_precision
 from tensorflow.keras.callbacks import ModelCheckpoint, CSVLogger
-from tensorflow.keras.optimizers import Optimizer
 
-number_of_tiles = 4
+number_of_tiles = 9
 
 
 def get_class_weights(y, inverse=False):
@@ -92,29 +90,29 @@ def jigsaw_puzzle(img, puzzle_size):
     if puzzle_size == 9:
         # img = tf.image.resize(img, [225, 225])
         # split_img = split_image(img, [75, 75], puzzle_size=puzzle_size)
-        img = tf.image.resize(img, [114, 114])
-        split_img = split_image(img, [38, 38], puzzle_size=puzzle_size)
+        img = tf.image.resize(img, [129, 129])
+        split_img = split_image(img, [43, 43], puzzle_size=puzzle_size)
         idx = tf.constant([0, 1, 2, 3, 4, 5, 6, 7, 8])
         idx = tf.random.shuffle(idx)
         split_img = tf.gather(split_img, idx, axis=0)
 
         rec_img = unsplit_image(split_img, tf.shape(img), puzzle_size=puzzle_size)
         # rec_img = tf.image.resize(rec_img, [224, 224])
-        rec_img = tf.image.resize(rec_img, [112, 112])
+        rec_img = tf.image.resize(rec_img, [128, 128])
         return rec_img, idx
 
     elif puzzle_size == 4:
         # img = tf.image.resize(img, [224, 224])
         # split_img = split_image(img, [112, 112], puzzle_size=puzzle_size)
-        img = tf.image.resize(img, [112, 112])
-        split_img = split_image(img, [56, 56], puzzle_size=puzzle_size)
+        img = tf.image.resize(img, [128, 128])
+        split_img = split_image(img, [64, 64], puzzle_size=puzzle_size)
         idx = tf.constant([0, 1, 2, 3])
         idx = tf.random.shuffle(idx)
         split_img = tf.gather(split_img, idx, axis=0)
 
         rec_img = unsplit_image(split_img, tf.shape(img), puzzle_size=puzzle_size)
         # rec_img = tf.image.resize(rec_img, [224, 224])
-        rec_img = tf.image.resize(rec_img, [112, 112])
+        # rec_img = tf.image.resize(rec_img, [112, 112])
         return rec_img, idx
 
     else:
@@ -181,10 +179,10 @@ def bluring(image, size=1, sigma=1.5):
     return image
 
 
-def resizing(image, min_size=32):
-    size = tf.random.uniform(shape=[], minval=min_size, maxval=112, dtype=tf.int32)
+def resizing(image, min_size=64):
+    size = tf.random.uniform(shape=[], minval=min_size, maxval=128, dtype=tf.int32)
     image = tf.image.resize(image, (size, size))
-    image = tf.image.resize(image, (112, 112))
+    image = tf.image.resize(image, (128, 128))
     return image
 
 
@@ -199,8 +197,8 @@ def custom_augment(image):
     return image
 
 
-def barlow_twins_augmenting(augmented_img):
-    augmented_img = tf.image.random_flip_left_right(augmented_img)
+def do_augmenting(augmented_img):
+    # augmented_img = tf.image.random_flip_left_right(augmented_img)
     rot_label = tf.random.uniform(shape=[1], minval=-15, maxval=15, dtype=tf.int32)
     rad = tf.divide((tf.cast(rot_label, tf.float32)) * np.pi, 180)
     # rot_label = tf.random.uniform(shape=[1], minval=0, maxval=3, dtype=tf.int32)
@@ -209,11 +207,11 @@ def barlow_twins_augmenting(augmented_img):
     augmented_img = tf.squeeze(augmented_img)
 
     # augmented_img = rand_crop(augmented_img, fmin=0.75, fmax=0.99)
-    size = tf.random.uniform(shape=[], minval=110, maxval=180, dtype=tf.int32)
+    size = tf.random.uniform(shape=[], minval=150, maxval=200, dtype=tf.int32)
     augmented_img = tf.image.random_crop(augmented_img, (size, size, 3))
-    augmented_img = tf.image.resize(augmented_img, [112, 112])
 
     augmented_img = custom_augment(augmented_img)
+    augmented_img = tf.image.resize(augmented_img, [128, 128])
 
     # augmented_img = tf.image.random_hue(augmented_img, 0.08)
     # augmented_img = tf.clip_by_value(augmented_img, 0.0, 1.0)
@@ -234,9 +232,9 @@ def barlow_twins_augmenting(augmented_img):
     # augmented_img = tf.clip_by_value(augmented_img, 0.0, 1.0)
     # img, shuffle_label = jigsaw_puzzle(img, number_of_tiles)
 
-    augmented_img = tfa.image.random_cutout(tf.expand_dims(augmented_img, 0), mask_size=(40, 40),
-                                            constant_values=0)
-    augmented_img = tf.squeeze(augmented_img)
+    # augmented_img = tfa.image.random_cutout(tf.expand_dims(augmented_img, 0), mask_size=(44, 44),
+    #                                         constant_values=0)
+    # augmented_img = tf.squeeze(augmented_img)
     return augmented_img
 
 
@@ -244,7 +242,7 @@ def train_preprocessing(image_path, label):
     img = tf.io.read_file(image_path)
     img = tf.io.decode_image(img, channels=3, dtype=tf.dtypes.float32, expand_animations=False)
     # img = tf.image.resize(img, [350, 350])
-    img = tf.image.resize_with_pad(img, 180, 180)
+    img = tf.image.resize_with_pad(img, 200, 200)
     # img = tf.image.resize_with_pad(img, 150, 150)
     # img = tf.image.resize(img, [150, 150])
 
@@ -256,7 +254,7 @@ def train_preprocessing(image_path, label):
     original_img = tf.image.resize(original_img, [112, 112])
 
     # augmented_img = tf.image.resize(img, [112, 112])
-    augmented_img = barlow_twins_augmenting(img)
+    augmented_img = do_augmenting(img)
     # augmented_img = rand_crop(img, fmin=0.7, fmax=1.0)
     # augmented_img = tf.image.resize(augmented_img, [112, 112])
 
@@ -269,15 +267,11 @@ def train_preprocessing(image_path, label):
     # augmented_img = tf.squeeze(augmented_img)
 
     puzzled_img, shuffle_label = jigsaw_puzzle(augmented_img, number_of_tiles)
+    # puzzled_img = augmented_img
     # puzzled_img = tf.image.resize(puzzled_img, [112, 112])
 
-    puzzled_imgs = {
-        '112': puzzled_img,
-        '96': tf.image.resize(puzzled_img, [96, 96]),
-        '80': tf.image.resize(puzzled_img, [80, 80]),
-        '64': tf.image.resize(puzzled_img, [64, 64]),
-        '56': tf.image.resize(puzzled_img, [56, 56]),
-    }
+    augmented_img = tf.image.resize(augmented_img, [112, 112])
+
     all_labels = {
         'emotion': tf.one_hot(label, depth=8),
     }
@@ -294,8 +288,17 @@ def train_preprocessing(image_path, label):
     for i in range(number_of_tiles):
         all_sample_weights[f'part_{i + 1}'] = 0.5
 
-    # return img, all_labels, all_sample_weights
-    # return original_img, augmented_img, all_labels, all_sample_weights
+    return original_img, augmented_img, puzzled_img, all_labels, all_sample_weights
+
+
+def resize_batch(original_img, augmented_img, puzzled_img, all_labels, all_sample_weights):
+    rand_size_1 = tf.random.uniform(shape=[], minval=113, maxval=128, dtype=tf.int32)
+    rand_size_2 = tf.random.uniform(shape=[], minval=64, maxval=111, dtype=tf.int32)
+    puzzled_imgs = {
+        '113_128': tf.image.resize(puzzled_img, [rand_size_1, rand_size_1]),
+        '112': tf.image.resize(puzzled_img, [112, 112]),
+        '64_111': tf.image.resize(puzzled_img, [rand_size_2, rand_size_2]),
+    }
     return original_img, augmented_img, puzzled_imgs, all_labels, all_sample_weights
 
 
@@ -317,32 +320,25 @@ def valid_preprocessing(image_path, label):
         'emotion': tf.one_hot(label, depth=8),
     }
 
-    # shuffle_label = np.array(list(range(number_of_tiles)))
-    # shuffle_label = tf.one_hot(shuffle_label, depth=number_of_tiles)
-    # for i in range(number_of_tiles):
-    #     all_labels[f'part_{i + 1}'] = shuffle_label[i]
-
     return original_img, all_labels
-    # return img, original_img
 
 
-class BarlowTwins(tf.keras.Model):
-    def __init__(self, encoder, loss_fns, mixed_prec=True, lambd=5e-3):
-        super(BarlowTwins, self).__init__()
+class SiameseModel(tf.keras.Model):
+    def __init__(self, encoder, loss_fns, mixed_prec=True):
+        super(SiameseModel, self).__init__()
         self.loss_fns = loss_fns
         self.mixed_prec = mixed_prec
         self.encoder = encoder
-        self.lambd = lambd
         self.all_loss_tracker = tf.keras.metrics.Mean(name="all_loss")
-        self.loss_tracker = tf.keras.metrics.Mean(name="puzzle_loss")
+        self.puzzle_loss_tracker = tf.keras.metrics.Mean(name="puzzle_loss")
         self.emotion_loss_tracker = tf.keras.metrics.Mean(name="emotion_loss")
         self.emotion_acc_tracker = tf.keras.metrics.Mean(name="emotion_acc")
-        self.emotion_f1_tracker = tfa.metrics.F1Score(num_classes=8, name="emotion_f1")
+        self.emotion_f1_tracker = tfa.metrics.F1Score(num_classes=8, average='macro', name="emotion_f1")
 
     @property
     def metrics(self):
         return [self.all_loss_tracker,
-                self.loss_tracker,
+                self.puzzle_loss_tracker,
                 self.emotion_loss_tracker,
                 self.emotion_acc_tracker,
                 self.emotion_f1_tracker,
@@ -351,6 +347,14 @@ class BarlowTwins(tf.keras.Model):
     def call(self, inputs):
         return self.encoder(inputs)
 
+    @staticmethod
+    def multiply_list(myList):
+        # Multiply elements one by one
+        result = 1
+        for x in myList:
+            result = result * x
+        return result
+
     def train_step(self, data):
         # Unpack the data.
         img1, img2, puzzled_imgs, label, sample_weight = data
@@ -358,46 +362,55 @@ class BarlowTwins(tf.keras.Model):
 
         # Forward pass through the encoder and predictor.
         with tf.GradientTape() as tape:
-            emotion_1, _, _, _, _ = self.encoder(img1, training=True)
-            emotion_2, _, _, _, _ = self.encoder(img2, training=True)
-            emotion_3, p1_3, p2_3, p3_3, p4_3 = self.encoder(puzzled_imgs['112'], training=True)
-            emotion_4, p1_4, p2_4, p3_4, p4_4 = self.encoder(puzzled_imgs['96'], training=True)
-            emotion_5, p1_5, p2_5, p3_5, p4_5 = self.encoder(puzzled_imgs['80'], training=True)
-            emotion_6, p1_6, p2_6, p3_6, p4_6 = self.encoder(puzzled_imgs['64'], training=True)
-            emotion_7, p1_7, p2_7, p3_7, p4_7 = self.encoder(puzzled_imgs['56'], training=True)
+            # emotion_1, _, _, _, _ = self(img1, training=True)
+            emotion_2, _, _, _, _, _, _, _, _, _ = self(img2, training=True)
+            emotion_3, p1_3, p2_3, p3_3, p4_3, p5_3, p6_3, p7_3, p8_3, p9_3 = self(puzzled_imgs['113_128'],
+                                                                                   training=True)
+            emotion_4, p1_4, p2_4, p3_4, p4_4, p5_4, p6_4, p7_4, p8_4, p9_4 = self(puzzled_imgs['112'],
+                                                                                   training=True)
+            emotion_5, p1_5, p2_5, p3_5, p4_5, p5_5, p6_5, p7_5, p8_5, p9_5 = self(puzzled_imgs['64_111'],
+                                                                                   training=True)
 
-            emotion_loss_1 = self.loss_fns['emotion'](label['emotion'], emotion_1, sample_weight['emotion'])
+            # emotion_loss_1 = self.loss_fns['emotion'](label['emotion'], emotion_1, sample_weight['emotion'])
             emotion_loss_2 = self.loss_fns['emotion'](label['emotion'], emotion_2, sample_weight['emotion'])
             emotion_loss_3 = self.loss_fns['emotion'](label['emotion'], emotion_3, sample_weight['emotion'])
             emotion_loss_4 = self.loss_fns['emotion'](label['emotion'], emotion_4, sample_weight['emotion'])
             emotion_loss_5 = self.loss_fns['emotion'](label['emotion'], emotion_5, sample_weight['emotion'])
-            emotion_loss_6 = self.loss_fns['emotion'](label['emotion'], emotion_6, sample_weight['emotion'])
-            emotion_loss_7 = self.loss_fns['emotion'](label['emotion'], emotion_7, sample_weight['emotion'])
 
             emotions_losses_list = [
-                emotion_loss_1,
-                emotion_loss_2, emotion_loss_3,
-                emotion_loss_4, emotion_loss_5,
-                emotion_loss_6, emotion_loss_7]
+                # emotion_loss_1,
+                emotion_loss_2,
+                emotion_loss_3,
+                emotion_loss_4,
+                emotion_loss_5,
+            ]
 
-            emotions_loss = sum(emotions_losses_list) / len(emotions_losses_list)
+            # emotions_loss = sum(emotions_losses_list) / len(emotions_losses_list)
+            emotions_loss = tf.pow(self.multiply_list(emotions_losses_list), 1 / len(emotions_losses_list))
 
             puzzles_heads = [
-                [p1_3, p2_3, p3_3, p4_3],
-                [p1_4, p2_4, p3_4, p4_4],
-                [p1_5, p2_5, p3_5, p4_5],
-                [p1_6, p2_6, p3_6, p4_6],
-                [p1_7, p2_7, p3_7, p4_7]
+                [p1_3, p2_3, p3_3, p4_3, p5_3, p6_3, p7_3, p8_3, p9_3],
+                [p1_4, p2_4, p3_4, p4_4, p5_4, p6_4, p7_4, p8_4, p9_4],
+                [p1_5, p2_5, p3_5, p4_5, p5_5, p6_5, p7_5, p8_5, p9_5],
             ]
 
             puzzle_loss = 0
-            for p1, p2, p3, p4 in puzzles_heads:
+            for p1, p2, p3, p4, p5, p6, p7, p8, p9 in puzzles_heads:
                 puzzle_loss += self.loss_fns['part_1'](label['part_1'], p1)
                 puzzle_loss += self.loss_fns['part_2'](label['part_2'], p2)
                 puzzle_loss += self.loss_fns['part_3'](label['part_3'], p3)
                 puzzle_loss += self.loss_fns['part_4'](label['part_4'], p4)
+                puzzle_loss += self.loss_fns['part_5'](label['part_5'], p5)
+                puzzle_loss += self.loss_fns['part_6'](label['part_6'], p6)
+                puzzle_loss += self.loss_fns['part_7'](label['part_7'], p7)
+                puzzle_loss += self.loss_fns['part_8'](label['part_8'], p8)
+                puzzle_loss += self.loss_fns['part_9'](label['part_9'], p9)
 
-            loss = emotions_loss + puzzle_loss * 0.5
+            puzzle_loss *= 0.3
+
+            # final loss
+            loss = emotions_loss + puzzle_loss
+            #             loss = emotions_loss
 
             if mixed_precision:
                 scaled_loss = self.optimizer.get_scaled_loss(loss)
@@ -412,13 +425,13 @@ class BarlowTwins(tf.keras.Model):
 
         # Monitor loss and acc
         self.all_loss_tracker.update_state(loss)
-        self.loss_tracker.update_state(puzzle_loss)
+        self.puzzle_loss_tracker.update_state(puzzle_loss)
         self.emotion_loss_tracker.update_state(emotions_loss)
-        self.emotion_acc_tracker.update_state(tf.keras.metrics.categorical_accuracy(label['emotion'], emotion_2))
-        self.emotion_f1_tracker.update_state(label['emotion'], emotion_2)
+        self.emotion_acc_tracker.update_state(tf.keras.metrics.categorical_accuracy(label['emotion'], emotion_4))
+        self.emotion_f1_tracker.update_state(label['emotion'], emotion_4)
 
         return {"all_loss": self.all_loss_tracker.result(),
-                "puzzle_loss": self.loss_tracker.result(),
+                "puzzle_loss": self.puzzle_loss_tracker.result(),
                 "emotion_loss": self.emotion_loss_tracker.result(),
                 "emotion_acc": self.emotion_acc_tracker.result(),
                 "emotion_f1": self.emotion_f1_tracker.result(),
@@ -429,7 +442,7 @@ class BarlowTwins(tf.keras.Model):
         img1, label = data
 
         # Forward pass through the encoder and predictor.
-        emotion_1, _, _, _, _ = self.encoder(img1, training=False)
+        emotion_1, _, _, _, _, _, _, _, _, _ = self(img1, training=False)
 
         # emotions_loss = tf.keras.losses.categorical_crossentropy(emotion_1, label['emotion'])
         emotions_loss = self.loss_fns['emotion'](label['emotion'], emotion_1)
@@ -451,15 +464,13 @@ def main():
     tf.keras.backend.clear_session()
     mixed_precision.set_global_policy('mixed_float16')
     batch = 128
+    # weight_decay = 0.1
+    # np.random.seed(12)
 
     # dataset dir includes label and Manually_Annotated_Images folders
-    dataset_dir = os.path.abspath("S:/dataset/FER/AffectNet/Manually_Annotated")
+    dataset_dir = os.path.abspath("S:/Datasets/FER/AffectNet")
 
-    # model_name = 'ssl_barlow_twins-no_augment'
-    # model_name = 'ssl_barlow_twins-weak_augment'
-    # model_name = 'ssl_barlow_twins-strong_augment'
-    # model_name = 'sl_2_geometric-ssl_barlow_twins_2_geometric'
-    # model_name = f'sl-ssl_barlow_twins_puzzle-batch_{batch}-wd_{weight_decay}'
+    # model_name = f'sl_wo_siamese-batch_{batch}'
     model_name = f'sl-ssl_puzzling_{int(np.sqrt(number_of_tiles))}×{int(np.sqrt(number_of_tiles))}-batch_{batch}'
 
     if not os.path.exists(f"./results/{model_name}"):
@@ -474,21 +485,25 @@ def main():
     train_csv_data = train_csv_data[~train_csv_data['subDirectory_filePath'].str.contains(".bmp", case=False)]
     train_csv_data = train_csv_data[train_csv_data['expression'] <= 7]
     train_csv_data['subDirectory_filePath'] = os.path.join(dataset_dir,
-                                                           'Manually_Annotated_Images/') + \
+                                                           'Manually_Annotated_Images/Manually_Annotated_Images/') + \
                                               train_csv_data['subDirectory_filePath'].astype(str)
 
     valid_csv_data = pd.read_csv(valid_csv_dir, names=['subDirectory_filePath', 'face_x', 'face_y', 'face_width',
                                                        'face_height', 'facial_landmarks', 'expression', 'valence',
                                                        'arousal'],
                                  low_memory=False)
-    valid_csv_data = valid_csv_data[~valid_csv_data['subDirectory_filePath'].str.contains(".tif", case=False)]
-    valid_csv_data = valid_csv_data[valid_csv_data['expression'] <= 7]
-    valid_csv_data['subDirectory_filePath'] = os.path.join(dataset_dir,
-                                                           'Manually_Annotated_Images/') + \
-                                              valid_csv_data['subDirectory_filePath'].astype(str)
 
-    # train_csv_data = train_csv_data.groupby("expression").sample(n=np.min(train_csv_data['expression'].value_counts()),
-    #                                                              random_state=1)
+    valid_csv_data = valid_csv_data[~valid_csv_data['subDirectory_filePath'].str.contains(".tif", case=False)]
+    valid_csv_data['subDirectory_filePath'] = os.path.join(dataset_dir,
+                                                           'Manually_Annotated_Images/Manually_Annotated_Images/') + \
+                                              valid_csv_data['subDirectory_filePath'].astype(str)
+    valid_csv_data = valid_csv_data[valid_csv_data['expression'] <= 7]
+
+    #     train_csv_data = train_csv_data.groupby("expression").sample(
+    # n=np.min(train_csv_data['expression'].value_counts()),
+    #         n=500,
+    #         random_state=1)
+
     input_data = train_csv_data.iloc[:, 0]
     train_labels = train_csv_data.iloc[:, 6]
 
@@ -500,7 +515,7 @@ def main():
 
     train_ds = tf.data.Dataset.from_tensor_slices((np.array(input_data), np.array(train_labels)))
     train_ds = train_ds.shuffle(int(len(train_csv_data))).map(train_preprocessing, num_parallel_calls=autotune)
-    train_ds = train_ds.batch(batch).prefetch(autotune)
+    train_ds = train_ds.batch(batch).map(resize_batch, num_parallel_calls=autotune).prefetch(autotune)
 
     valid_labels = valid_csv_data.iloc[:, 6]
     input_data = valid_csv_data.iloc[:, 0]
@@ -509,39 +524,29 @@ def main():
 
     # for testing:
     # for i, j, p, l, w in train_ds:
-    #     for i, j in valid_ds:
     #     print(i.numpy().shape)
     #     original_imgs = i.numpy()
     #     augmented_imgs = j.numpy()
-    # puzzled_imgs = p.numpy()
-    # original_imgs = (original_imgs * 255).astype(np.uint8)
-    # for inx, b in enumerate(range(original_imgs.shape[0])):
-    #     original_img = original_imgs[b, :, :, :]
-    #     augmented_img = augmented_imgs[b, :, :, :]
-    # puzzled_img = puzzled_imgs[b, :, :, :]
-    # cv2.imshow('original', cv2.cvtColor(cv2.resize(original_img, (224, 224)), cv2.COLOR_RGB2BGR))
-    # cv2.imshow('augmented', cv2.cvtColor(cv2.resize(augmented_img, (224, 224)), cv2.COLOR_RGB2BGR))
-    # cv2.imshow('puzzle augmented', cv2.cvtColor(cv2.resize(puzzled_img, (224, 224)), cv2.COLOR_RGB2BGR))
-    # cv2.waitKey(0)
-    #
+    #     print(p['113_128'].shape)
+    #     puzzled_imgs = p['64_111'].numpy()
+    #     original_imgs = (original_imgs * 255).astype(np.uint8)
+    #     for inx, b in enumerate(range(original_imgs.shape[0])):
+    #         original_img = original_imgs[b, :, :, :]
+    #         augmented_img = augmented_imgs[b, :, :, :]
+    #         puzzled_img = puzzled_imgs[b, :, :, :]
+    #         cv2.imshow('original', cv2.cvtColor(cv2.resize(original_img, (224, 224)), cv2.COLOR_RGB2BGR))
+    #         cv2.imshow('augmented', cv2.cvtColor(cv2.resize(augmented_img, (224, 224)), cv2.COLOR_RGB2BGR))
+    #         cv2.imshow('puzzle augmented', cv2.cvtColor(cv2.resize(puzzled_img, (224, 224)), cv2.COLOR_RGB2BGR))
+    #         cv2.waitKey(0)
+
     tf.keras.backend.clear_session()
-    # backbone = MobileNetV2(include_top=False,
-    #                        input_shape=(112, 112, 3),
-    #                        weights=None,
-    #                        )
     backbone = ResNet50(include_top=False,
                         # input_shape=(112, 112, 3),
                         weights=None,
                         )
     # backbone.summary()
+
     representation = tf.keras.layers.GlobalAveragePooling2D()(backbone.output)
-    projection_outputs = tf.keras.layers.Dense(1024, activation='linear')(representation)
-    projection_outputs = tf.keras.layers.BatchNormalization()(projection_outputs)
-    projection_outputs = tf.keras.activations.relu(projection_outputs)
-    projection_outputs = tf.keras.layers.Dense(1024, activation='linear')(projection_outputs)
-    projection_outputs = tf.keras.layers.BatchNormalization()(projection_outputs)
-    projection_outputs = tf.keras.activations.relu(projection_outputs)
-    projection_outputs = tf.keras.layers.Dense(256, activation='linear', dtype=tf.float32)(projection_outputs)
 
     # self supervised heads
     puzzle_dropout = tf.keras.layers.Dropout(0.3)(representation)
@@ -552,15 +557,11 @@ def main():
                                                            dtype='float32')(puzzle_dropout)
 
     emotion_dropout = tf.keras.layers.Dropout(0.3)(representation)
-    # emotion = tf.keras.layers.Dense(1280, activation='linear')(emotion_dropout)
-    # emotion = tf.keras.layers.BatchNormalization()(emotion)
-    # emotion = tf.keras.activations.relu(emotion)
     emotion = tf.keras.layers.Dense(8, activation='softmax', name="emotion",
                                     dtype=tf.float32)(emotion_dropout)
 
     heads = [
         emotion,
-        # projection_outputs
     ]
 
     # self-supervised heads
@@ -573,8 +574,8 @@ def main():
     model.summary()
     # op = tf.keras.optimizers.Adam(learning_rate=0.001)
 
-    STEPS_PER_EPOCH = 1124
-    TOTAL_STEPS = STEPS_PER_EPOCH * 120
+    STEPS_PER_EPOCH = # TODO
+    TOTAL_STEPS = STEPS_PER_EPOCH * 200
     WARMUP_EPOCHS = 3
     WARMUP_STEPS = int(WARMUP_EPOCHS * STEPS_PER_EPOCH)
 
@@ -585,14 +586,8 @@ def main():
         warmup_steps=WARMUP_STEPS
     )
 
-    # lr_decayed_fn = tf.keras.optimizers.schedules.CosineDecay(
-    #     0.001, TOTAL_STEPS)
-
-    # step = tf.Variable(0, trainable=False)
-    # wd = lambda: weight_decay * lr_decayed_fn(step)
-
     opt = adabelief_tf.AdaBeliefOptimizer(learning_rate=lr_decayed_fn,
-                                          # weight_decay=wd,
+                                          #                                           weight_decay=wd,
                                           print_change_log=False)
     # opt = tf.keras.optimizers.SGD(learning_rate=lr_decayed_fn,
     #                               momentum=0.9, nesterov=True)
@@ -605,7 +600,7 @@ def main():
     for i in range(number_of_tiles):
         losses[f'part_{i + 1}'] = tf.keras.losses.CategoricalCrossentropy()
 
-    model = BarlowTwins(model, mixed_prec=True, loss_fns=losses)
+    model = SiameseModel(model, mixed_prec=True, loss_fns=losses)
 
     model.compile(
         optimizer=op,
@@ -621,15 +616,6 @@ def main():
     csv_callback = CSVLogger(f"./results/{model_name}/training_log.csv",
                              append=False)
 
-    def lr_scheduler(epoch, lr):
-        if epoch == 60 or epoch == 120:
-            lr = lr / 10
-            return lr
-        else:
-            return lr
-
-    lr_callback = tf.keras.callbacks.LearningRateScheduler(lr_scheduler)
-
     callbacks_list = [
         # loss_checkpoint,
         # lr_callback,
@@ -643,7 +629,7 @@ def main():
         validation_data=valid_ds,
         callbacks=callbacks_list,
         verbose=2,
-        epochs=120)
+        epochs=200)
 
     print('finish')
 
